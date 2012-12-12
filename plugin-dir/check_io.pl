@@ -30,9 +30,10 @@
 
 use strict;
 use Getopt::Long;
+use List::Util qw( min max sum );
 
 # Configuration
-
+my $tmp_errors = "/var/tmp/check_io_";
 
 # create performance data
 # 0 ... disabled
@@ -53,11 +54,18 @@ my @o_exclude	= ();		# exclude disks
 my $o_errors	= undef;	# error detection
 my $o_max	= undef;	# get max values
 my $o_average	= undef;	# get average values
-my @o_warn	= ();		# warning
-my @o_crit	= ();		# critical
+my $o_warn	= undef;	# warning
+my $o_crit	= undef;	# critical
+my @warn	= ();
+my @crit	= ();
 
 my %status	= ( ok => "OK", warning => "WARNING", critical => "CRITICAL", unknown => "UNKNOWN");
 my %ERRORS	= ( "OK" => 0, "WARNING" => 1, "CRITICAL" => 2, "UNKNOWN" => 3);
+
+my $statuscode	= "unknown";
+my $statustext	= "";
+my $perfstats	= "|";
+my %errors;
 
 #***************************************************#
 #  Function: parse_options                          #
@@ -77,8 +85,8 @@ sub parse_options(){
 	'E'	=> \$o_errors,		'errors'	=> \$o_errors,
 	'm'	=> \$o_max,		'max'		=> \$o_max,
 	'a'	=> \$o_average,		'average'	=> \$o_average,
-	'w:s'	=> \@o_warn,		'warning:s'	=> \@o_warn,
-	'c:s'	=> \@o_crit,		'critical:s'	=> \@o_crit
+	'w:s'	=> \$o_warn,		'warning:s'	=> \$o_warn,
+	'c:s'	=> \$o_crit,		'critical:s'	=> \$o_crit
   );
 
   # process options
@@ -92,6 +100,32 @@ sub parse_options(){
     exit $ERRORS{$status{'unknown'}};
   }
 
+  if ((! defined $o_warn) || (! defined $o_crit)){
+    print "Warning and critical values are required!\n";
+    print_usage();
+    exit $ERRORS{$status{'unknown'}};
+  }
+
+  # check warning and critical
+  if ($o_warn !~ /^(\d+)(\.?\d+)*,{1}(\d+)(\.?\d+)*,(\d+)(\.?\d+)*$/){
+    print "Please give proper warning values!\n";
+    print_usage();
+    exit $ERRORS{$status{'unknown'}};
+  }else{
+    @warn = split /,/, $o_warn;
+  }
+
+  if ($o_crit !~ /^(\d+)(\.?\d+)*,{1}(\d+)(\.?\d+)*,(\d+)(\.?\d+)*$/){
+    print "Please give proper critical values!\n";
+    print_usage();
+    exit $ERRORS{$status{'unknown'}};
+  }else{
+    @crit = split /,/, $o_crit;
+  }
+
+  # verbose handling
+  $o_verbose = 0 if ! defined $o_verbose;
+
 }
 
 
@@ -102,9 +136,8 @@ sub parse_options(){
 #                                                   #
 #***************************************************#
 sub print_usage(){
-  print "Usage: $0 [-v] -H <hostname> [-p <port>] -a <auth> [-A <api>] [-t <timeout>] \n";
-  print "       -D <data center> | -C <cluster> | -R <rhev host> | -S <storage domain> -M <vm> | -P <vmpool> \n";
-  print "       [-w <warn>] [-c <critical>] [-V] [-l <check>] [-s <subcheck>]\n"; 
+  print "Usage: $0 [-v] [-r <runs>] [-i <interval>] [-e <exclude>] [-E] [-m|-a] \n";
+  print "        -w <tps,svctm,wait> -c <tps,svctm,wait>\n";
 }
 
 
@@ -115,7 +148,7 @@ sub print_usage(){
 #                                                   #
 #***************************************************#
 sub print_help(){
-  print "\nRed Hat Enterprise Virtualization checks for Icinga/Nagios version $version\n";
+  print "\nLinux and Solaris I/O checks for Icinga/Nagios version $version\n";
   print "GPL license, (c)2012 - Rene Koch <r.koch\@ovido.at>\n\n";
   print_usage();
   print <<EOT;
@@ -125,32 +158,28 @@ Options:
     Print detailed help screen
  -V, --version
     Print version information
- -H, --hostname
-    Host name or IP Address of RHEV Manager
- -a, --authorization=AUTH_PAIR
-    Username\@domain:password required for login to REST-API
- -D, --dc
-    RHEV data center name
- -C, --cluster
-    RHEV cluster name
- -R, --host
-    RHEV Hypervisor name
- -S, --storage
-    RHEV Storage domain name
- -M, --vm
-    RHEV virtual machine name
- -P, --vmpool
-    RHEV vm pool
- -l, --check
-    DC/Cluster/Hypervisor/VM/Storage Pool Check
-    see $projecturl or README for details
- -s, --subcheck
-    DC/Cluster/Hypervisor/VM/Storage Pool Subcheck
-    see $projecturl or README for details
- -w, --warning=DOUBLE
+ -r, --runs=INTEGER
+    iostat count (default: $o_runs)
+ -i, --interval=INTEGER
+    iostat interval (default: $o_interval)
+ -e, --exclude=REGEX
+    Regex to exclude disks from beeing checked
+ -E, --errors
+    Check disk errors on Solaris
+ -m, --max
+    Use max. values of runs for tps, svctm and iowait (default)
+ -a, --average
+    Use average values of runs for tps, svctm and iowait
+ -w, --warning=<tpd,svctm,wait>
     Value to result in warning status
- -c, --critical=DOUBLE
+    tps: transfers per second
+    svctm: avg service time for I/O requests issued to the device
+    wait: CPU I/O waiting for outstanding I/O requests
+ -c, --critical=<tpd,svctm,wait>
     Value to result in critical status
+    tps: transfers per second
+    svctm: avg service time for I/O requests issued to the device
+    wait: CPU I/O waiting for outstanding I/O requests
  -v, --verbose
     Show details for command-line debugging
     (Icinga/Nagios may truncate output)
@@ -194,44 +223,44 @@ my $kernel_release = `uname -r | cut -d- -f1`;
 chomp $kernel_name;
 chomp $kernel_release;
 
+my $cmd = undef;
+
 if ($kernel_name eq "Linux"){
-#  # iostat on RHEL 5 is a little bit different to RHEL 6, so we check for kernel version
-#  # RHEL 5 includes partitions on devices, RHEL 6 doesn't
-#  # RHEL 5: can't use -x and -p at the same time
-#  if ($kernel_release =~ /2.6.18/){
-#    # RHEL 5
-#
-#  }else{
-#    # RHEL 6
-#    # get list of devices
-    my $devices = "";
-    my @tmp = `iostat -d`;
-    for (my $i=0;$i<=$#tmp;$i++){
-      next if $tmp[$i] =~ /^$/;
-      next if $tmp[$i] =~ /^Linux/;
-      next if $tmp[$i] =~ /^Device:/;
-      chomp $tmp[$i];
-      my @dev = split / /, $tmp[$i];
 
-      # match devs with exclude list
-      my $match = 0;
-      for (my $x=0;$x<=$#o_exclude;$x++){
-	$match = 1 if $dev[0] =~ /$o_exclude[$x]/;
-      }
+  # get list of devices
+  my $devices = "";
+  my @tmp = `iostat -d`;
+  for (my $i=0;$i<=$#tmp;$i++){
+    next if $tmp[$i] =~ /^$/;
+    next if $tmp[$i] =~ /^Linux/;
+    next if $tmp[$i] =~ /^Device:/;
+    chomp $tmp[$i];
+    my @dev = split / /, $tmp[$i];
 
-      # exclude cd drives
-      if (-e "/dev/cdrom"){
-	my $cdrom = `ls -l /dev/cdrom | tr -s ' ' ' ' | cut -d' ' -f11`;
-        chomp $cdrom;
-	next if $dev[0] eq $cdrom;
-      }
-
-      $devices .= " -p " . $dev[0] if $match != 1;
-
+    # match devs with exclude list
+    my $match = 0;
+    for (my $x=0;$x<=$#o_exclude;$x++){
+      $match = 1 if $dev[0] =~ /$o_exclude[$x]/;
     }
-    my $cmd = "iostat -dkx" . $devices . " " . $o_interval . " " . $o_runs;
-    print "CMD: $cmd \n";
-#  }
+
+    # exclude cd drives
+    if (-e "/dev/cdrom"){
+      my $cdrom = `ls -l /dev/cdrom | tr -s ' ' ' ' | cut -d' ' -f11`;
+      chomp $cdrom;
+      next if $dev[0] eq $cdrom;
+    }
+
+    # RHEL 5: can't use -x and -p at the same time
+    if ($kernel_release =~ /2.6.18/){
+      $devices .= " " . $dev[0] if $match != 1;
+    }else{
+      $devices .= " -p " . $dev[0] if $match != 1;
+    }
+
+  }
+
+  $cmd = "iostat -kx" . $devices . " " . $o_interval . " " . $o_runs;
+#    print "CMD: $cmd \n";
 
 }elsif ($kernel_name eq "SunOS"){
 
@@ -263,16 +292,278 @@ if ($kernel_name eq "Linux"){
       # skip automount devices
       next if $dev[11] =~ /vold\(pid\d+\)/;
 
-      $devices .= " -p " . $dev[11] if $match != 1;
+      $devices .= " " . $dev[11] if $match != 1;
+
+      # handle temp files for disk
+      if (defined $o_errors){
+        if (! -e $tmp_errors . "_" . $dev[11]){
+          if (! open (TMPERRORS, ">$tmp_errors" . "_" . $dev[11]) ){
+	    print "File $tmp_errors isn't writeable!\n";
+	    exit $ERRORS{$status{'unknown'}};
+          }
+          # fill file with 0 values
+          my @a = ("soft","hard","transport","media","drive","nodev","recoverable","illegal");
+	  foreach (@a){
+	    print TMPERRORS $_ . " 0\n";
+	    $errors{$dev[11]}{$_} = 0;
+	  }
+          close (TMPERRORS);
+        }else{
+          if (! -w $tmp_errors . "_" . $dev[11]){
+	    print "File $tmp_errors isn't writeable!\n";
+	    exit $ERRORS{$status{'unknown'}};
+          }
+          # read values
+          open TMPERRORS, $tmp_errors . "_" . $dev[11];
+          while (<TMPERRORS>){
+	    my @tmp = split / /, $_;
+	    $errors{$dev[11]}{$tmp[0]} = $tmp[1];
+          }
+          close (TMPERRORS);
+        }
+      }
 
     }
-    my $cmd = "iostat -dnx" . $devices . " " . $o_interval . " " . $o_runs;
-    print "CMD: $cmd \n";
+    if (defined $o_errors){
+      $cmd = "iostat -Excn" . $devices . " " . $o_interval . " " . $o_runs;
+    }else{
+      $cmd = "iostat -xcn" . $devices . " " . $o_interval . " " . $o_runs;
+    }
+#    print "CMD: $cmd \n";
 
 }else{
   exit_plugin ("unknown", "Operating system $kernel_name isn't supported, yet.");
 }
 
+my %iostat;
+my $x=0;
+my $hdd = undef;
+
+# get statistics from iostat
+my @result = `$cmd`;
+for (my $i=0;$i<=$#result;$i++){
+
+  $result[$i] =~ s/\s+/ /g;
+
+    # Fedora / RHEL:
+    # Linux 3.4.11-1.fc16.x86_64 (pc-ovido02.lan.ovido.at) 	12/11/2012 	_x86_64_	(4 CPU)
+    #
+    # avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+    #            6.15    0.00    2.94    1.93    0.00   88.98
+    #
+    # Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+    # sda               0.40    10.24    3.41   13.54    70.65   103.22    20.52     0.26   15.27   13.18   15.80   4.41   7.47
+
+    # Solaris:
+    #     cpu
+    # us sy wt id
+    #  1  1  0 98
+    #                    extended device statistics              
+    #    r/s    w/s   kr/s   kw/s wait actv wsvc_t asvc_t  %w  %b device
+    #    0.3    1.6   15.8   12.0  0.0  0.0    5.0    3.2   0   0 c0d0
+
+#print "LINE: $result[$i]\n";
+
+    # get disk statistics on Linux
+    if ( $result[$i] =~ /^(\w+)(-*)(\d*)(\s)((\d+)\.(\d+)(\s){1}){5}(\d+)\.(\d+)/ ){
+
+      my @tmp = split / /, $result[$i];
+      $iostat{$tmp[0]}{'rs'}[$x-1] = $tmp[3];
+      $iostat{$tmp[0]}{'ws'}[$x-1] = $tmp[4];
+      $iostat{$tmp[0]}{'rkBs'}[$x-1] = $tmp[5];
+      $iostat{$tmp[0]}{'wkBs'}[$x-1] = $tmp[6];
+      $iostat{$tmp[0]}{'wait'}[$x-1] = $tmp[9];
+      if ($kernel_release =~ /2.6.18/){
+        $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[10];
+      }else{
+        $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[12];
+      }
+#      print "r/s @ $tmp[0]: $iostat{$tmp[0]}{'rs'}[$x-1] -> $x\n";
+#      print "w/s @ $tmp[0]: $iostat{$tmp[0]}{'ws'}[$x-1] -> $x\n";
+#      print "rbK/s @ $tmp[0]: $iostat{$tmp[0]}{'rkBs'}[$x-1] -> $x\n";
+#      print "wkB/s @ $tmp[0]: $iostat{$tmp[0]}{'wkBs'}[$x-1] -> $x\n";
+#      print "svctm @ $tmp[0]: $iostat{$tmp[0]}{'svctm'}[$x-1] -> $x\n";
+
+    # get disk statistics on Solaris
+    }elsif ( $result[$i] =~ /^(\s+)((\d+)\.(\d+)(\s){1}){8}((\d+)(\s){1}){2}(\w+)/ ){
+
+      my @tmp = split / /, $result[$i];
+      $iostat{$tmp[11]}{'rs'}[$x-1] = $tmp[1];
+      $iostat{$tmp[11]}{'ws'}[$x-1] = $tmp[2];
+      $iostat{$tmp[11]}{'rkBs'}[$x-1] = $tmp[3];
+      $iostat{$tmp[11]}{'wkBs'}[$x-1] = $tmp[4];
+      $iostat{$tmp[11]}{'wait'}[$x-1] = $tmp[5];
+      $iostat{$tmp[11]}{'svctm'}[$x-1] = $tmp[7] + $tmp[8];
+#      print "r/s @ $tmp[11]: $iostat{$tmp[11]}{'rs'}[$x-1]\n";
+#      print "w/s @ $tmp[11]: $iostat{$tmp[11]}{'ws'}[$x-1]\n";
+#      print "rkB/s @ $tmp[11]: $iostat{$tmp[11]}{'rkBs'}[$x-1]\n";
+#      print "wkB/s @ $tmp[11]: $iostat{$tmp[11]}{'wkBs'}[$x-1]\n";
+#      print "svctm @ $tmp[11]: $iostat{$tmp[11]}{'svctm'}[$x-1]\n";
+
+    # get ioawait on Linux
+    }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}\.(\d){1,2}(\s){1}){5}(\d){1,3}\.(\d){1,2}(\s){1}$/ ){
+
+      my @tmp = split / /, $result[$i];
+      $iostat{'iowait'}[$x] = $tmp[4];
+#      print "iowait: $iostat{'iowait'}[$x]\n";
+      $x++;
+
+    # get iowait on Solaris
+    }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}(\s){1}){3}(\d){1,3}(\s){1}$/ ){
+
+      my @tmp = split / /, $result[$i];
+      $iostat{'iowait'}[$x] = $tmp[3];
+#      print "iowait: $iostat{'iowait'}[$x]\n";
+      $x++;
+
+   # get disks errors on Solaris
+   }elsif ( $result[$i] =~ /Soft\sErrors:/ ){
+     my @tmp = split / /, $result[$i];
+     $hdd = $tmp[0];
+     if ($tmp[3] > $errors{$hdd}{'soft'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (Soft Errors: $tmp[3])";
+     }
+     if ($tmp[6] > $errors{$hdd}{'hard'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (Hard Errors: $tmp[6])";
+     }
+     if ($tmp[9] > $errors{$hdd}{'transport'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (Transport Errors: $tmp[9])";
+     }
+     $errors{$hdd}{'soft'} = $tmp[3];
+     $errors{$hdd}{'hard'} = $tmp[6];
+     $errors{$hdd}{'transport'} = $tmp[9];
+   }elsif ( $result[$i] =~ /^Media\sError:/ ){
+     my @tmp = split / /, $result[$i];
+     if ($tmp[2] > $errors{$hdd}{'media'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (Media Errors: $tmp[2])";
+     }
+     if ($tmp[6] > $errors{$hdd}{'drive'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (Drive Not Ready: $tmp[6])";
+     }
+     if ($tmp[9] > $errors{$hdd}{'nodev'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (No Device: $tmp[9])";
+     }
+     if ($tmp[11] > $errors{$hdd}{'recoverable'}){
+       $statuscode = "warning" if $statuscode ne "critical";
+       $statustext .= " $hdd (Recoverable: $tmp[11])";
+     }
+     $errors{$hdd}{'media'} = $tmp[2];
+     $errors{$hdd}{'drive'} = $tmp[6];
+     $errors{$hdd}{'nodev'} = $tmp[9];
+     $errors{$hdd}{'recoverable'} = $tmp[11];
+   }elsif ( $result[$i] =~ /^Illegal\sRequest:/ ){
+     my @tmp = split / /, $result[$i];
+     if ($tmp[2] > $errors{$hdd}{'illegal'}){
+       $statuscode = "critical";
+       $statustext .= " $hdd (Illegal Requests: $tmp[2])";
+     }
+     $errors{$hdd}{'illegal'} = $tmp[2];
+   }
+}
+
+if (defined $o_errors){
+  foreach my $disk (keys %errors){
+    # write errors to file
+    if (! open (TMPERRORS, ">$tmp_errors" . "_" . $disk) ){
+      print "File $tmp_errors" . "_" . "$disk isn't writeable!\n";
+      exit $ERRORS{$status{'unknown'}};
+    }
+    foreach my $param (keys %{ $errors{$disk} }){
+      print TMPERRORS $param . " $errors{$disk}{$param}\n";
+      $perfstats .= "'" . $disk . "_" . $param . "'=$errors{$disk}{$param}c;;;0; ";
+    }
+    close (TMPERRORS);
+  }
+}
+
+
+# do some calculations
+
+# iowait
+my $value = undef;
+$value = max @{ $iostat{'iowait'} } if defined $o_max;
+$value = (sum @{ $iostat{'iowait'} }) / (scalar @{ $iostat{'iowait'} }) if ! defined $o_max;
+$perfstats .= "'iowait'=$value%;$warn[2];$crit[2];0;100 ";
+
+if ($value >= $crit[2]){
+  $statuscode = 'critical';
+  $statustext .= " iowait: $value,";
+}elsif ($value >= $warn[2]){
+  $statuscode = 'warning';
+  $statustext .= " iowait: $value," if $statuscode ne 'critical';
+  $statustext .= " iowait: $value," if $o_verbose >= 1 && $statuscode eq 'critical';
+}else{
+  $statuscode = 'ok' if $statuscode ne 'critical' && $statuscode ne 'warning';
+  $statustext .= " iowait: $value," if $o_verbose >= 1;
+}
+
+
+# disk statistics
+foreach my $disk (keys %iostat){
+  next if $disk eq 'iowait';
+  my ($rs, $ws) = undef;
+  foreach my $param (keys %{ $iostat{$disk} }){
+    # remove first entry when using multiple runs
+    shift @{ $iostat{$disk}{$param} } if $o_runs > 1;
+    $value = max @{ $iostat{$disk}{$param} } if defined $o_max;
+    $value = (sum @{ $iostat{$disk}{$param} }) / (scalar @{ $iostat{$disk}{$param} }) if ! defined $o_max;
+    if ($param eq "rs"){
+      $rs = $value;
+      $perfstats .= "'" . $disk . "_r/s'=$value;$warn[0];$crit[0];0; ";
+    }elsif ($param eq "ws"){
+      $ws = $value;
+      $perfstats .= "'" . $disk . "_w/s'=$value;$warn[0];$crit[0];0; ";
+    }elsif ($param eq "rkBs"){
+      $perfstats .= "'" . $disk . "_rkB/s'=$value" . "KB;;;0; ";
+    }elsif ($param eq "wkBs"){
+      $perfstats .= "'" . $disk . "_wkB/s'=$value" . "KB;;;0; ";
+    }elsif ($param eq "wait"){
+      $perfstats .= "'" . $disk . "_wait'=$value" . "ms;;;0; ";
+    }elsif ($param eq "svctm"){
+      ($statuscode,$statustext) = get_status($value,$warn[1],$crit[1],$disk,$param);
+      $perfstats .= "'" . $disk . "_svctm'=$value;$warn[1];$crit[1];0; ";
+    }
+  }
+  my $tps = $rs + $ws;
+  ($statuscode,$statustext) = get_status($tps,$warn[0],$crit[0],$disk,"tps")
+}
+
+$statustext = " on all disks." if $statuscode eq 'ok' && $o_verbose == 0;
+$statustext .= $perfstats if $perfdata == 1;
+exit_plugin($statuscode,$statustext);
+
+
+#***************************************************#
+#  Function get_status                              #
+#---------------------------------------------------#
+#  Matches value againts warning and critical       #
+#  ARG1: value                                      #
+#  ARG2: warning                                    #
+#  ARG3: critical                                   #
+#  ARG4: disk                                       #
+#  ARG5: parameter                                  #
+#***************************************************#
+
+sub get_status{
+  if ($_[0] >= $_[2]){
+    $statuscode = 'critical';
+    $statustext .= " $_[3] ($_[4]: $_[0]),";
+  }elsif ($_[0] >= $_[1]){
+    $statuscode = 'warning';
+    $statustext .= " $_[3] ($_[4]: $_[0])," if $statuscode ne 'critical';
+    $statustext .= " $_[3] ($_[4]: $_[0])," if $o_verbose >= 1 && $statuscode eq 'critical';
+  }else{
+    $statuscode = 'ok' if $statuscode ne 'critical' && $statuscode ne 'warning';
+    $statustext .= " $_[3] ($_[4]: $_[0])," if $o_verbose >= 1;
+  }
+  return ($statuscode,$statustext);
+}
 
 #***************************************************#
 #  Function exit_plugin                             #
@@ -283,7 +574,7 @@ if ($kernel_name eq "Linux"){
 #***************************************************#
 
 sub exit_plugin{
-  print "I/O $status{$_[0]}: $_[1]\n";
+  print "I/O $status{$_[0]}:$_[1]\n";
   exit $ERRORS{$status{$_[0]}};
 }
 
