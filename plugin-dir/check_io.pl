@@ -369,11 +369,7 @@ for (my $i=0;$i<=$#result;$i++){
     $iostat{$tmp[0]}{'rkBs'}[$x-1] = $tmp[5];
     $iostat{$tmp[0]}{'wkBs'}[$x-1] = $tmp[6];
     $iostat{$tmp[0]}{'wait'}[$x-1] = $tmp[9];
-    if ($kernel_release =~ /2.6.18/){
-      $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[10];
-    }else{
-      $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[12];
-  }
+    $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[10];
 
   # get disk statistics on Solaris
   }elsif ( $result[$i] =~ /^(\s+)((\d+)\.(\d+)(\s){1}){8}((\d+)(\s){1}){2}(\w+)/ ){
