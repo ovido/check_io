@@ -34,6 +34,8 @@ use List::Util qw( min max sum );
 
 # Configuration
 my $tmp_errors = "/var/tmp/check_io_";
+my $o_runs	= 5;		# iostat runs
+my $o_interval	= 1;		# iostat interval
 
 # create performance data
 # 0 ... disabled
@@ -48,8 +50,6 @@ my $projecturl  = "https://labs.ovido.at/monitoring/wiki/check_io";
 my $o_verbose	= undef;	# verbosity
 my $o_help	= undef;	# help
 my $o_version	= undef;	# version
-my $o_runs	= 5;		# iostat runs
-my $o_interval	= 1;		# iostat interval
 my @o_exclude	= ();		# exclude disks
 my $o_errors	= undef;	# error detection
 my $o_max	= undef;	# get max values
@@ -260,7 +260,6 @@ if ($kernel_name eq "Linux"){
   }
 
   $cmd = "iostat -kx" . $devices . " " . $o_interval . " " . $o_runs;
-#    print "CMD: $cmd \n";
 
 }elsif ($kernel_name eq "SunOS"){
 
@@ -329,7 +328,6 @@ if ($kernel_name eq "Linux"){
     }else{
       $cmd = "iostat -xcn" . $devices . " " . $o_interval . " " . $o_runs;
     }
-#    print "CMD: $cmd \n";
 
 }else{
   exit_plugin ("unknown", "Operating system $kernel_name isn't supported, yet.");
@@ -345,125 +343,111 @@ for (my $i=0;$i<=$#result;$i++){
 
   $result[$i] =~ s/\s+/ /g;
 
-    # Fedora / RHEL:
-    # Linux 3.4.11-1.fc16.x86_64 (pc-ovido02.lan.ovido.at) 	12/11/2012 	_x86_64_	(4 CPU)
-    #
-    # avg-cpu:  %user   %nice %system %iowait  %steal   %idle
-    #            6.15    0.00    2.94    1.93    0.00   88.98
-    #
-    # Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
-    # sda               0.40    10.24    3.41   13.54    70.65   103.22    20.52     0.26   15.27   13.18   15.80   4.41   7.47
+  # Fedora / RHEL:
+  # Linux 3.4.11-1.fc16.x86_64 (pc-ovido02.lan.ovido.at) 	12/11/2012 	_x86_64_	(4 CPU)
+  #
+  # avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+  #            6.15    0.00    2.94    1.93    0.00   88.98
+  #
+  # Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+  # sda               0.40    10.24    3.41   13.54    70.65   103.22    20.52     0.26   15.27   13.18   15.80   4.41   7.47
 
-    # Solaris:
-    #     cpu
-    # us sy wt id
-    #  1  1  0 98
-    #                    extended device statistics              
-    #    r/s    w/s   kr/s   kw/s wait actv wsvc_t asvc_t  %w  %b device
-    #    0.3    1.6   15.8   12.0  0.0  0.0    5.0    3.2   0   0 c0d0
+  # Solaris:
+  #     cpu
+  # us sy wt id
+  #  1  1  0 98
+  #                    extended device statistics              
+  #    r/s    w/s   kr/s   kw/s wait actv wsvc_t asvc_t  %w  %b device
+  #    0.3    1.6   15.8   12.0  0.0  0.0    5.0    3.2   0   0 c0d0
 
-#print "LINE: $result[$i]\n";
+  # get disk statistics on Linux
+  if ( $result[$i] =~ /^(\w+)(-*)(\d*)(\s)((\d+)\.(\d+)(\s){1}){5}(\d+)\.(\d+)/ ){
 
-    # get disk statistics on Linux
-    if ( $result[$i] =~ /^(\w+)(-*)(\d*)(\s)((\d+)\.(\d+)(\s){1}){5}(\d+)\.(\d+)/ ){
+    my @tmp = split / /, $result[$i];
+    $iostat{$tmp[0]}{'rs'}[$x-1] = $tmp[3];
+    $iostat{$tmp[0]}{'ws'}[$x-1] = $tmp[4];
+    $iostat{$tmp[0]}{'rkBs'}[$x-1] = $tmp[5];
+    $iostat{$tmp[0]}{'wkBs'}[$x-1] = $tmp[6];
+    $iostat{$tmp[0]}{'wait'}[$x-1] = $tmp[9];
+    if ($kernel_release =~ /2.6.18/){
+      $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[10];
+    }else{
+      $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[12];
+  }
 
-      my @tmp = split / /, $result[$i];
-      $iostat{$tmp[0]}{'rs'}[$x-1] = $tmp[3];
-      $iostat{$tmp[0]}{'ws'}[$x-1] = $tmp[4];
-      $iostat{$tmp[0]}{'rkBs'}[$x-1] = $tmp[5];
-      $iostat{$tmp[0]}{'wkBs'}[$x-1] = $tmp[6];
-      $iostat{$tmp[0]}{'wait'}[$x-1] = $tmp[9];
-      if ($kernel_release =~ /2.6.18/){
-        $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[10];
-      }else{
-        $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[12];
-      }
-#      print "r/s @ $tmp[0]: $iostat{$tmp[0]}{'rs'}[$x-1] -> $x\n";
-#      print "w/s @ $tmp[0]: $iostat{$tmp[0]}{'ws'}[$x-1] -> $x\n";
-#      print "rbK/s @ $tmp[0]: $iostat{$tmp[0]}{'rkBs'}[$x-1] -> $x\n";
-#      print "wkB/s @ $tmp[0]: $iostat{$tmp[0]}{'wkBs'}[$x-1] -> $x\n";
-#      print "svctm @ $tmp[0]: $iostat{$tmp[0]}{'svctm'}[$x-1] -> $x\n";
+  # get disk statistics on Solaris
+  }elsif ( $result[$i] =~ /^(\s+)((\d+)\.(\d+)(\s){1}){8}((\d+)(\s){1}){2}(\w+)/ ){
 
-    # get disk statistics on Solaris
-    }elsif ( $result[$i] =~ /^(\s+)((\d+)\.(\d+)(\s){1}){8}((\d+)(\s){1}){2}(\w+)/ ){
+    my @tmp = split / /, $result[$i];
+    $iostat{$tmp[11]}{'rs'}[$x-1] = $tmp[1];
+    $iostat{$tmp[11]}{'ws'}[$x-1] = $tmp[2];
+    $iostat{$tmp[11]}{'rkBs'}[$x-1] = $tmp[3];
+    $iostat{$tmp[11]}{'wkBs'}[$x-1] = $tmp[4];
+    $iostat{$tmp[11]}{'wait'}[$x-1] = $tmp[5];
+    $iostat{$tmp[11]}{'svctm'}[$x-1] = $tmp[7] + $tmp[8];
 
-      my @tmp = split / /, $result[$i];
-      $iostat{$tmp[11]}{'rs'}[$x-1] = $tmp[1];
-      $iostat{$tmp[11]}{'ws'}[$x-1] = $tmp[2];
-      $iostat{$tmp[11]}{'rkBs'}[$x-1] = $tmp[3];
-      $iostat{$tmp[11]}{'wkBs'}[$x-1] = $tmp[4];
-      $iostat{$tmp[11]}{'wait'}[$x-1] = $tmp[5];
-      $iostat{$tmp[11]}{'svctm'}[$x-1] = $tmp[7] + $tmp[8];
-#      print "r/s @ $tmp[11]: $iostat{$tmp[11]}{'rs'}[$x-1]\n";
-#      print "w/s @ $tmp[11]: $iostat{$tmp[11]}{'ws'}[$x-1]\n";
-#      print "rkB/s @ $tmp[11]: $iostat{$tmp[11]}{'rkBs'}[$x-1]\n";
-#      print "wkB/s @ $tmp[11]: $iostat{$tmp[11]}{'wkBs'}[$x-1]\n";
-#      print "svctm @ $tmp[11]: $iostat{$tmp[11]}{'svctm'}[$x-1]\n";
+  # get ioawait on Linux
+  }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}\.(\d){1,2}(\s){1}){5}(\d){1,3}\.(\d){1,2}(\s){1}$/ ){
 
-    # get ioawait on Linux
-    }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}\.(\d){1,2}(\s){1}){5}(\d){1,3}\.(\d){1,2}(\s){1}$/ ){
+    my @tmp = split / /, $result[$i];
+    $iostat{'iowait'}[$x] = $tmp[4];
+    $x++;
 
-      my @tmp = split / /, $result[$i];
-      $iostat{'iowait'}[$x] = $tmp[4];
-#      print "iowait: $iostat{'iowait'}[$x]\n";
-      $x++;
+  # get iowait on Solaris
+  }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}(\s){1}){3}(\d){1,3}(\s){1}$/ ){
 
-    # get iowait on Solaris
-    }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}(\s){1}){3}(\d){1,3}(\s){1}$/ ){
+    my @tmp = split / /, $result[$i];
+    $iostat{'iowait'}[$x] = $tmp[3];
+    $x++;
 
-      my @tmp = split / /, $result[$i];
-      $iostat{'iowait'}[$x] = $tmp[3];
-#      print "iowait: $iostat{'iowait'}[$x]\n";
-      $x++;
-
-   # get disks errors on Solaris
-   }elsif ( $result[$i] =~ /Soft\sErrors:/ ){
-     my @tmp = split / /, $result[$i];
-     $hdd = $tmp[0];
-     if ($tmp[3] > $errors{$hdd}{'soft'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (Soft Errors: $tmp[3])";
-     }
-     if ($tmp[6] > $errors{$hdd}{'hard'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (Hard Errors: $tmp[6])";
-     }
-     if ($tmp[9] > $errors{$hdd}{'transport'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (Transport Errors: $tmp[9])";
-     }
-     $errors{$hdd}{'soft'} = $tmp[3];
-     $errors{$hdd}{'hard'} = $tmp[6];
-     $errors{$hdd}{'transport'} = $tmp[9];
-   }elsif ( $result[$i] =~ /^Media\sError:/ ){
-     my @tmp = split / /, $result[$i];
-     if ($tmp[2] > $errors{$hdd}{'media'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (Media Errors: $tmp[2])";
-     }
-     if ($tmp[6] > $errors{$hdd}{'drive'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (Drive Not Ready: $tmp[6])";
-     }
-     if ($tmp[9] > $errors{$hdd}{'nodev'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (No Device: $tmp[9])";
-     }
-     if ($tmp[11] > $errors{$hdd}{'recoverable'}){
-       $statuscode = "warning" if $statuscode ne "critical";
-       $statustext .= " $hdd (Recoverable: $tmp[11])";
-     }
-     $errors{$hdd}{'media'} = $tmp[2];
-     $errors{$hdd}{'drive'} = $tmp[6];
-     $errors{$hdd}{'nodev'} = $tmp[9];
-     $errors{$hdd}{'recoverable'} = $tmp[11];
-   }elsif ( $result[$i] =~ /^Illegal\sRequest:/ ){
-     my @tmp = split / /, $result[$i];
-     if ($tmp[2] > $errors{$hdd}{'illegal'}){
-       $statuscode = "critical";
-       $statustext .= " $hdd (Illegal Requests: $tmp[2])";
-     }
-     $errors{$hdd}{'illegal'} = $tmp[2];
+  # get disks errors on Solaris
+  }elsif ( $result[$i] =~ /Soft\sErrors:/ ){
+    my @tmp = split / /, $result[$i];
+    $hdd = $tmp[0];
+    if ($tmp[3] > $errors{$hdd}{'soft'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (Soft Errors: $tmp[3])";
+    }
+    if ($tmp[6] > $errors{$hdd}{'hard'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (Hard Errors: $tmp[6])";
+    }
+    if ($tmp[9] > $errors{$hdd}{'transport'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (Transport Errors: $tmp[9])";
+    }
+    $errors{$hdd}{'soft'} = $tmp[3];
+    $errors{$hdd}{'hard'} = $tmp[6];
+    $errors{$hdd}{'transport'} = $tmp[9];
+  }elsif ( $result[$i] =~ /^Media\sError:/ ){
+    my @tmp = split / /, $result[$i];
+    if ($tmp[2] > $errors{$hdd}{'media'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (Media Errors: $tmp[2])";
+    }
+    if ($tmp[6] > $errors{$hdd}{'drive'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (Drive Not Ready: $tmp[6])";
+    }
+    if ($tmp[9] > $errors{$hdd}{'nodev'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (No Device: $tmp[9])";
+    }
+    if ($tmp[11] > $errors{$hdd}{'recoverable'}){
+      $statuscode = "warning" if $statuscode ne "critical";
+      $statustext .= " $hdd (Recoverable: $tmp[11])";
+    }
+    $errors{$hdd}{'media'} = $tmp[2];
+    $errors{$hdd}{'drive'} = $tmp[6];
+    $errors{$hdd}{'nodev'} = $tmp[9];
+    $errors{$hdd}{'recoverable'} = $tmp[11];
+  }elsif ( $result[$i] =~ /^Illegal\sRequest:/ ){
+    my @tmp = split / /, $result[$i];
+    if ($tmp[2] > $errors{$hdd}{'illegal'}){
+      $statuscode = "critical";
+      $statustext .= " $hdd (Illegal Requests: $tmp[2])";
+    }
+    $errors{$hdd}{'illegal'} = $tmp[2];
    }
 }
 
