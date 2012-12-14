@@ -224,11 +224,11 @@ chomp $kernel_name;
 chomp $kernel_release;
 
 my $cmd = undef;
+my $devices = "";
 
 if ($kernel_name eq "Linux"){
 
   # get list of devices
-  my $devices = "";
   my @tmp = `iostat -d`;
   for (my $i=0;$i<=$#tmp;$i++){
     next if $tmp[$i] =~ /^$/;
@@ -514,6 +514,8 @@ foreach my $disk (keys %iostat){
 }
 
 $statustext = " on all disks." if $statuscode eq 'ok' && $o_verbose == 0;
+# add checked devices to statustext
+$statustext .= " [disks: $devices]";
 $statustext .= $perfstats if $perfdata == 1;
 exit_plugin($statuscode,$statustext);
 
