@@ -258,7 +258,7 @@ if ($kernel_name eq "Linux"){
 
 }elsif ($kernel_name eq "SunOS"){
 
-    my $devices = "";
+    $devices = "";
     my @tmp = `iostat -xn`;
     for (my $i=0;$i<=$#tmp;$i++){
       next if $tmp[$i] =~ /^$/;
@@ -485,6 +485,8 @@ if ($value >= $crit[2]){
 
 # disk statistics
 foreach my $disk (keys %iostat){
+  my $io = undef;
+  my $tmp_sc = undef;
   next if $disk eq 'iowait';
   my ($rs, $ws) = undef;
   foreach my $param (keys %{ $iostat{$disk} }){
@@ -505,17 +507,29 @@ foreach my $disk (keys %iostat){
     }elsif ($param eq "wait"){
       $perfstats .= "'" . $disk . "_wait'=$value" . "ms;;;0; ";
     }elsif ($param eq "svctm"){
-      ($statuscode,$statustext) = get_status($value,$warn[1],$crit[1],$disk,$param);
+      ($statuscode,$tmp_sc) = get_status($value,$warn[1],$crit[1]);
+      $io = " $disk ($param $value" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+      $io = " $disk ($param $value" if $o_verbose >= 1;
       $perfstats .= "'" . $disk . "_svctm'=$value;$warn[1];$crit[1];0; ";
     }
   }
   my $tps = $rs + $ws;
-  ($statuscode,$statustext) = get_status($tps,$warn[0],$crit[0],$disk,"tps")
+  ($statuscode,$tmp_sc) = get_status($tps,$warn[0],$crit[0]);
+  if (defined $io){
+    if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') || ($o_verbose >= 1) ){
+      $io .= ", tps $tps)";
+    }else{
+      $io .= ")";
+    }
+  }else{
+    $io = " $disk (tps $tps)" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+  }
+  $statustext .= $io if defined $io;
 }
 
 $statustext = " on all disks." if $statuscode eq 'ok' && $o_verbose == 0;
 # add checked devices to statustext
-$statustext .= " [disks: $devices]";
+$statustext .= " [disks:$devices]";
 $statustext .= $perfstats if $perfdata == 1;
 exit_plugin($statuscode,$statustext);
 
@@ -527,23 +541,21 @@ exit_plugin($statuscode,$statustext);
 #  ARG1: value                                      #
 #  ARG2: warning                                    #
 #  ARG3: critical                                   #
-#  ARG4: disk                                       #
-#  ARG5: parameter                                  #
 #***************************************************#
 
 sub get_status{
+  my $tmp_sc = undef;
   if ($_[0] >= $_[2]){
     $statuscode = 'critical';
-    $statustext .= " $_[3] ($_[4]: $_[0]),";
+    $tmp_sc = 'critical';
   }elsif ($_[0] >= $_[1]){
-    $statuscode = 'warning';
-    $statustext .= " $_[3] ($_[4]: $_[0])," if $statuscode ne 'critical';
-    $statustext .= " $_[3] ($_[4]: $_[0])," if $o_verbose >= 1 && $statuscode eq 'critical';
+    $statuscode = 'warning' if $statuscode ne 'critical';
+    $tmp_sc = 'warning';
   }else{
     $statuscode = 'ok' if $statuscode ne 'critical' && $statuscode ne 'warning';
-    $statustext .= " $_[3] ($_[4]: $_[0])," if $o_verbose >= 1;
+    $tmp_sc = 'ok';
   }
-  return ($statuscode,$statustext);
+  return ($statuscode,$tmp_sc);
 }
 
 #***************************************************#
