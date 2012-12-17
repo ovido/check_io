@@ -7,3 +7,6 @@
 * 0.1.0 - Thu Dec 12 2012
 - This is the first public beta release of new plugin check_io
 
+* 0.2.0 - Mon Dec 17 2012
+- Added short names for Solaris disks
+
