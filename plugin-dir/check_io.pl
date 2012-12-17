@@ -138,7 +138,7 @@ sub parse_options(){
 #                                                   #
 #***************************************************#
 sub print_usage(){
-  print "Usage: $0 [-v] [-r <runs>] [-i <interval>] [-e <exclude>] [-E] [-m|-a] \n";
+  print "Usage: $0 [-v] [-r <runs>] [-i <interval>] [-e <exclude>] [-E] [-s] [-m|-a] \n";
   print "        -w <tps,svctm,wait> -c <tps,svctm,wait>\n";
 }
 
@@ -168,6 +168,8 @@ Options:
     Regex to exclude disks from beeing checked
  -E, --errors
     Check disk errors on Solaris
+ -s, --short
+    Use short names on Solaris for Perfdata
  -m, --max
     Use max. values of runs for tps, svctm and iowait (default)
  -a, --average
