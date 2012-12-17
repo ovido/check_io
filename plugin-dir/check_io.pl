@@ -5,7 +5,7 @@
 #                                                     #
 #  Name:    check_io                                  #
 #                                                     #
-#  Version: 0.1                                       #
+#  Version: 0.2                                       #
 #  Created: 2012-12-13                                #
 #  License: GPL - http://www.gnu.org/licenses         #
 #  Copyright: (c)2012 ovido gmbh, http://www.ovido.at #
@@ -44,7 +44,7 @@ my $perfdata	= 1;
 
 # Variables
 my $prog	= "check_io";
-my $version	= "0.1";
+my $version	= "0.2";
 my $projecturl  = "https://labs.ovido.at/monitoring/wiki/check_io";
 
 my $o_verbose	= undef;	# verbosity
@@ -52,6 +52,7 @@ my $o_help	= undef;	# help
 my $o_version	= undef;	# version
 my @o_exclude	= ();		# exclude disks
 my $o_errors	= undef;	# error detection
+my $o_short	= undef;	# short names for disks
 my $o_max	= undef;	# get max values
 my $o_average	= undef;	# get average values
 my $o_warn	= undef;	# warning
@@ -83,6 +84,7 @@ sub parse_options(){
 	'i:i'	=> \$o_interval,	'interval:i'	=> \$o_interval,
 	'e:s'	=> \@o_exclude,		'exclude:s'	=> \@o_exclude,
 	'E'	=> \$o_errors,		'errors'	=> \$o_errors,
+	's'	=> \$o_short,		'short'		=> \$o_short,
 	'm'	=> \$o_max,		'max'		=> \$o_max,
 	'a'	=> \$o_average,		'average'	=> \$o_average,
 	'w:s'	=> \$o_warn,		'warning:s'	=> \$o_warn,
@@ -530,6 +532,26 @@ foreach my $disk (keys %iostat){
 $statustext = " on all disks." if $statuscode eq 'ok' && $o_verbose == 0;
 # add checked devices to statustext
 $statustext .= " [disks:$devices]";
+
+# loop through format to get disk numbers
+if (defined $o_short && $kernel_name eq "SunOS"){
+
+# get devices 
+my @devs = `echo | format`;
+  for (my $i=0;$i<=$#devs;$i++){
+    $devs[$i] =~ s/\s+/ /g;
+    next if $devs[$i] !~ /^(\s){1}(\d){1,3}\.(\s){1}(\w+)/;
+    chomp $devs[$i];
+    my @dev = split / /, $devs[$i];
+    chop $dev[1];
+    # substitute disk names with disk number from format - e.g.
+    # d0: c0t0d0
+    # d14: c10t60060160B0902800B6CDAB49CD57DF11d0
+    $perfstats =~ s/$dev[2]/d$dev[1]/g if $perfstats =~ $dev[2];
+  }
+
+}
+
 $statustext .= $perfstats if $perfdata == 1;
 exit_plugin($statuscode,$statustext);
 
