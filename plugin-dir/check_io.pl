@@ -109,7 +109,7 @@ sub parse_options(){
   }
 
   # check warning and critical
-  if ($o_warn !~ /^(\d+)(\.?\d+)*,{1}(\d+)(\.?\d+)*,(\d+)(\.?\d+)*$/){
+  if ($o_warn !~ /^(\d+)(\.?\d+)*,{1}(\d+)(\.?\d+)*,(\d+)(\.?\d+)*,(\d+)(\.?\d+)*$/){
     print "Please give proper warning values!\n";
     print_usage();
     exit $ERRORS{$status{'unknown'}};
@@ -117,7 +117,7 @@ sub parse_options(){
     @warn = split /,/, $o_warn;
   }
 
-  if ($o_crit !~ /^(\d+)(\.?\d+)*,{1}(\d+)(\.?\d+)*,(\d+)(\.?\d+)*$/){
+  if ($o_crit !~ /^(\d+)(\.?\d+)*,{1}(\d+)(\.?\d+)*,(\d+)(\.?\d+)*,(\d+)(\.?\d+)*$/){
     print "Please give proper critical values!\n";
     print_usage();
     exit $ERRORS{$status{'unknown'}};
@@ -139,7 +139,7 @@ sub parse_options(){
 #***************************************************#
 sub print_usage(){
   print "Usage: $0 [-v] [-r <runs>] [-i <interval>] [-e <exclude>] [-E] [-s] [-m|-a] \n";
-  print "        -w <tps,svctm,wait> -c <tps,svctm,wait>\n";
+  print "        -w <tps,svctm,wait,util> -c <tps,svctm,wait,util>\n";
 }
 
 
@@ -171,19 +171,21 @@ Options:
  -s, --short
     Use short names on Solaris for Perfdata
  -m, --max
-    Use max. values of runs for tps, svctm and iowait (default)
+    Use max. values of runs for tps, svctm iowait and util (default)
  -a, --average
-    Use average values of runs for tps, svctm and iowait
- -w, --warning=<tpd,svctm,wait>
+    Use average values of runs for tps, svctm iowait and util
+ -w, --warning=<tpd,svctm,wait,util>
     Value to result in warning status
     tps: transfers per second
     svctm: avg service time for I/O requests issued to the device
     wait: CPU I/O waiting for outstanding I/O requests
- -c, --critical=<tpd,svctm,wait>
+    util: ercentage of CPU time during which requests were issued
+ -c, --critical=<tpd,svctm,wait,util>
     Value to result in critical status
     tps: transfers per second
     svctm: avg service time for I/O requests issued to the device
     wait: CPU I/O waiting for outstanding I/O requests
+    util: ercentage of CPU time during which requests were issued
  -v, --verbose
     Show details for command-line debugging
     (Icinga/Nagios may truncate output)
@@ -370,8 +372,10 @@ for (my $i=0;$i<=$#result;$i++){
     $iostat{$tmp[0]}{'wait'}[$x-1] = $tmp[9];
     if (! $tmp[12]){
       $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[10];
+      $iostat{$tmp[0]}{'util'}[$x-1] = $tmp[11];
     }else{
       $iostat{$tmp[0]}{'svctm'}[$x-1] = $tmp[12];
+      $iostat{$tmp[0]}{'util'}[$x-1] = $tmp[13];
     }
 
   # get disk statistics on Solaris
@@ -384,6 +388,7 @@ for (my $i=0;$i<=$#result;$i++){
     $iostat{$tmp[11]}{'wkBs'}[$x-1] = $tmp[4];
     $iostat{$tmp[11]}{'wait'}[$x-1] = $tmp[5];
     $iostat{$tmp[11]}{'svctm'}[$x-1] = $tmp[7] + $tmp[8];
+    $iostat{$tmp[11]}{'util'}[$x-1] = $tmp[10];
 
   # get ioawait on Linux
   }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}\.(\d){1,2}(\s){1}){5}(\d){1,3}\.(\d){1,2}(\s){1}$/ ){
@@ -489,7 +494,8 @@ if ($value >= $crit[2]){
 
 # disk statistics
 foreach my $disk (keys %iostat){
-  my $io = undef;
+#  my $io = undef;
+  my $io = "";
   my $tmp_sc = undef;
   next if $disk eq 'iowait';
   my ($rs, $ws) = undef;
@@ -512,9 +518,13 @@ foreach my $disk (keys %iostat){
       $perfstats .= "'" . $disk . "_wait'=$value" . "ms;;;0; ";
     }elsif ($param eq "svctm"){
       ($statuscode,$tmp_sc) = get_status($value,$warn[1],$crit[1]);
-      $io = " $disk ($param $value" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
-      $io = " $disk ($param $value" if $o_verbose >= 1;
+      $io .= ", $param $value" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') || ($o_verbose >= 1) );
       $perfstats .= "'" . $disk . "_svctm'=$value;$warn[1];$crit[1];0; ";
+    }elsif ($param eq "util"){
+      ($statuscode,$tmp_sc) = get_status($value,$warn[3],$crit[3]);
+      $io = " $disk (util $value" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+      $io = " $disk (util $value" if $o_verbose >= 1;
+      $perfstats .= "'" . $disk . "_util'=$value" . "%;;;0; ";
     }
   }
   my $tps = $rs + $ws;
