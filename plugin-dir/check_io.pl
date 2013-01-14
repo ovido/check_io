@@ -5,7 +5,7 @@
 #                                                     #
 #  Name:    check_io                                  #
 #                                                     #
-#  Version: 0.2                                       #
+#  Version: 0.3                                       #
 #  Created: 2012-12-13                                #
 #  License: GPL - http://www.gnu.org/licenses         #
 #  Copyright: (c)2012 ovido gmbh, http://www.ovido.at #
@@ -44,7 +44,7 @@ my $perfdata	= 1;
 
 # Variables
 my $prog	= "check_io";
-my $version	= "0.2";
+my $version	= "0.3";
 my $projecturl  = "https://labs.ovido.at/monitoring/wiki/check_io";
 
 my $o_verbose	= undef;	# verbosity
