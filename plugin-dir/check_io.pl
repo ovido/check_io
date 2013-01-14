@@ -494,11 +494,11 @@ if ($value >= $crit[2]){
 
 # disk statistics
 foreach my $disk (keys %iostat){
-#  my $io = undef;
-  my $io = "";
+  my $io = undef;
   my $tmp_sc = undef;
   next if $disk eq 'iowait';
   my ($rs, $ws) = undef;
+  my %output;
   foreach my $param (keys %{ $iostat{$disk} }){
     # remove first entry when using multiple runs
     shift @{ $iostat{$disk}{$param} } if $o_runs > 1;
@@ -518,27 +518,35 @@ foreach my $disk (keys %iostat){
       $perfstats .= "'" . $disk . "_wait'=$value" . "ms;;;0; ";
     }elsif ($param eq "svctm"){
       ($statuscode,$tmp_sc) = get_status($value,$warn[1],$crit[1]);
-      $io .= ", $param $value" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') || ($o_verbose >= 1) );
+      $output{$disk}{$param} = $value if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+      $io .= ", $param $value" if $o_verbose >= 1;
       $perfstats .= "'" . $disk . "_svctm'=$value;$warn[1];$crit[1];0; ";
     }elsif ($param eq "util"){
       ($statuscode,$tmp_sc) = get_status($value,$warn[3],$crit[3]);
-      $io = " $disk (util $value" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+      $output{$disk}{$param} = $value if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
       $io = " $disk (util $value" if $o_verbose >= 1;
       $perfstats .= "'" . $disk . "_util'=$value" . "%;;;0; ";
     }
   }
   my $tps = $rs + $ws;
   ($statuscode,$tmp_sc) = get_status($tps,$warn[0],$crit[0]);
+  $io .= ", tps $tps)" if $o_verbose >= 1;
+  $output{$disk}{'tps'} = $tps if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+  
   if (defined $io){
-    if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') || ($o_verbose >= 1) ){
-      $io .= ", tps $tps)";
-    }else{
-      $io .= ")";
-    }
+    $statustext .= $io;
   }else{
-    $io = " $disk (tps $tps)" if ( ($tmp_sc eq 'critical') || ($tmp_sc eq 'warning') );
+    # print warning and critical values per disk
+    foreach my $dsk (keys %output){
+      $statustext .= " $disk (";
+      foreach my $parm (keys %{ $output{$dsk} }){
+        $statustext .= "$parm $output{$dsk}{$parm}, ";
+      }
+      chop $statustext;
+      chop $statustext;
+      $statustext .= ")";
+    }
   }
-  $statustext .= $io if defined $io;
 }
 
 $statustext = " on all disks." if $statuscode eq 'ok' && $o_verbose == 0;
