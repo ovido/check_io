@@ -28,6 +28,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# Changelog:
+# * 0.3.0 - Mon Jan 14 2013 - Rene Koch <r.koch@ovido.at>
+# - Added %b (Solaris) and $util (Linux) checks
+# * 0.2.0 - Mon Dec 17 2012 - Rene Koch <r.koch@ovido.at>
+# - Added short names for Solaris disks
+# * 0.1.0 - Thu Dec 12 2012 - Rene Koch <r.koch@ovido.at>
+# - This is the first public beta release of new plugin check_io
+
 use strict;
 use Getopt::Long;
 use List::Util qw( min max sum );
