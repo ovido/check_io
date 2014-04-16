@@ -399,7 +399,7 @@ for (my $i=0;$i<=$#result;$i++){
     $iostat{$tmp[11]}{'util'}[$x-1] = $tmp[10];
 
   # get ioawait on Linux
-  }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}\.(\d){1,2}(\s){1}){5}(\d){1,3}\.(\d){1,2}(\s){1}$/ ){
+  }elsif ( $result[$i] =~ /^(\s){1}((\d){1,3}\.(\d){1,2}(\s){1}){4,5}(\d){1,3}\.(\d){1,2}(\s){1}$/ ){
 
     my @tmp = split / /, $result[$i];
     $iostat{'iowait'}[$x] = $tmp[4];
