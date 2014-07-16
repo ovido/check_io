@@ -5,7 +5,7 @@
 #                                                     #
 #  Name:    check_io                                  #
 #                                                     #
-#  Version: 0.4                                       #
+#  Version: 0.5                                       #
 #  Created: 2012-12-13                                #
 #  License: GPL - http://www.gnu.org/licenses         #
 #  Copyright: (c)2012-2013 ovido gmbh                 #
@@ -30,6 +30,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Changelog:
+# * 0.5.0 - Wed Jul 16 2014 - Rene Koch <rkoch@linuxland.at>
+# - Fixed regex for Solaris md devices
 # * 0.4.0 - Wed Apr 16 2014 - Rene Koch <rkoch@linuxland.at>
 # - Fixed regex for RHEL 4 support (thanks nenioscio)
 # * 0.3.0 - Mon Jan 14 2013 - Rene Koch <r.koch@ovido.at>
@@ -55,7 +57,7 @@ my $perfdata	= 1;
 
 # Variables
 my $prog	= "check_io";
-my $version	= "0.4";
+my $version	= "0.5";
 my $projecturl  = "https://github.com/ovido/check_io";
 
 my $o_verbose	= undef;	# verbosity
@@ -302,6 +304,12 @@ if ($kernel_name eq "Linux"){
 
       # skip automount devices
       next if $dev[11] =~ /vold\(pid\d+\)/;
+      
+      # fix name for md devices
+      # e.g. 2.5    6.1   68.6  118.4  0.0  0.0    0.0    1.8   0   1 2/md13
+      if ($dev[11] =~ /^(\d+)\/(\w+)/){
+      	$dev[11] =~ s/^(\d+)\///;
+      }
 
       $devices .= " " . $dev[11] if $match != 1;
 
